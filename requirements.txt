@@ -1,0 +1,17 @@
+streamlit>=1.28.0
+openai>=1.3.0
+# Simple vector database options (choose one)
+faiss-cpu>=1.7.0
+sentence-transformers>=5.0.0  # For embeddings
+# chromadb>=0.4.0  # Alternative: keep chromadb for local mode
+# sqlite-vss>=0.1.0  # Alternative: SQLite with vector search
+
+# Core data processing
+pandas>=2.1.0
+numpy>=1.24.0
+plotly>=5.17.0
+python-dotenv>=1.0.0
+
+# Database and storage
+sqlite3  # Built into Python, no need to install
+sqlalchemy>=2.0.0  # ORM for database operations
