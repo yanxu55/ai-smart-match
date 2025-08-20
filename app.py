@@ -8,7 +8,15 @@ project_root = Path(__file__).parent
 sys.path.append(str(project_root))
 
 from database.smart_sqlite_db import SmartDatabaseManager
-from database.smart_vector_db import SmartVectorDatabase
+
+# Try to import vector database, but handle gracefully if dependencies are missing
+try:
+    from database.smart_vector_db import SmartVectorDatabase
+    VECTOR_DB_AVAILABLE = True
+except ImportError as e:
+    VECTOR_DB_AVAILABLE = False
+    VECTOR_DB_ERROR = str(e)
+
 from agents.ai_agent import AIAgent
 from agents.recommendation_engine import RecommendationEngine
 from utils.visualization import (

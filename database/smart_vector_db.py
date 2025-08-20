@@ -3,37 +3,94 @@ Smart vector database using FAISS for similarity search
 This replaces ChromaDB with a lighter, file-based vector search solution.
 """
 
-import faiss
 import numpy as np
 import json
 import os
 import pickle
 from typing import List, Dict, Optional, Tuple
-from sentence_transformers import SentenceTransformer
 import uuid
+
+# Optional imports for vector functionality
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
+
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 class SmartVectorDatabase:
     """Smart vector database using FAISS for similarity search."""
     
     def __init__(self, data_dir: str = "data/vectors"):
+        if not FAISS_AVAILABLE:
+            raise ImportError("FAISS is required for vector operations. Install with: pip install faiss-cpu")
+        
         self.data_dir = data_dir
         os.makedirs(data_dir, exist_ok=True)
         
-        # Initialize sentence transformer for embeddings
-        # Check if a specific embedding model is configured
-        embedding_model = os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
+        # Initialize embedding method
+        self.use_local_embeddings = SENTENCE_TRANSFORMERS_AVAILABLE
         
-        try:
-            self.model = SentenceTransformer(embedding_model)
-            print(f"✅ Embedding model loaded: {embedding_model}")
-        except Exception as e:
-            print(f"⚠️  Failed to load {embedding_model}, falling back to all-MiniLM-L6-v2")
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        if SENTENCE_TRANSFORMERS_AVAILABLE:
+            try:
+                # Try to use sentence transformers
+                embedding_model = os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
+                self.model = SentenceTransformer(embedding_model)
+                print(f"✅ Local embedding model loaded: {embedding_model}")
+                # Get embedding dimension dynamically
+                self.embedding_dim = self.model.get_sentence_embedding_dimension()
+            except Exception as e:
+                print(f"⚠️  Failed to load local embeddings: {e}")
+                print("🔄 Falling back to OpenAI embeddings")
+                self.use_local_embeddings = False
+                self._setup_openai_embeddings()
+        else:
+            print("ℹ️  sentence-transformers not available, using OpenAI embeddings")
+            self._setup_openai_embeddings()
             
-        # Get embedding dimension dynamically
-        test_embedding = self.model.encode("test")
-        self.embedding_dim = len(test_embedding)
-        print(f"   Embedding dimension: {self.embedding_dim}")
+    def _setup_openai_embeddings(self):
+        """Setup OpenAI embeddings as fallback"""
+        import openai
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables. Please set it in your .env file.")
+        
+        self.openai_client = openai.OpenAI(api_key=api_key)
+        self.embedding_model = "text-embedding-ada-002"
+        self.embedding_dim = 1536  # OpenAI ada-002 dimension
+        print(f"   Using OpenAI embeddings with dimension: {self.embedding_dim}")
+        
+    def _get_embeddings(self, texts):
+        """Get embeddings using either local model or OpenAI API"""
+        if isinstance(texts, str):
+            texts = [texts]
+        
+        if self.use_local_embeddings:
+            return self.model.encode(texts, normalize_embeddings=True)
+        else:
+            # Use OpenAI embeddings
+            embeddings = []
+            for text in texts:
+                response = self.openai_client.embeddings.create(
+                    input=text,
+                    model=self.embedding_model
+                )
+                embeddings.append(response.data[0].embedding)
+            
+            # Convert to numpy array and normalize
+            embeddings = np.array(embeddings, dtype=np.float32)
+            # Normalize embeddings
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            embeddings = embeddings / (norms + 1e-8)  # Avoid division by zero
+            return embeddings
         
         # Initialize FAISS indices
         self.activities_index = None
@@ -146,7 +203,7 @@ class SmartVectorDatabase:
         
         # Create embeddings
         texts = [self._create_activity_text(activity) for activity in activities]
-        embeddings = self.model.encode(texts, normalize_embeddings=True)
+        embeddings = self._get_embeddings(texts)
         
         # Add to FAISS index
         self.activities_index.add(embeddings.astype('float32'))
@@ -173,7 +230,7 @@ class SmartVectorDatabase:
         """Add a student profile to the vector database."""
         # Create embedding
         text = self._create_student_text(student)
-        embedding = self.model.encode([text], normalize_embeddings=True)
+        embedding = self._get_embeddings([text])
         
         # Add to FAISS index
         self.student_profiles_index.add(embedding.astype('float32'))
@@ -200,7 +257,7 @@ class SmartVectorDatabase:
         
         # Create query embedding
         query_text = self._create_student_text(student_profile)
-        query_embedding = self.model.encode([query_text], normalize_embeddings=True)
+        query_embedding = self._get_embeddings([query_text])
         
         # Search FAISS index
         n_results = min(n_results, self.activities_index.ntotal)
@@ -230,7 +287,7 @@ class SmartVectorDatabase:
         
         # Create query embedding
         query_text = self._create_student_text(target_student)
-        query_embedding = self.model.encode([query_text], normalize_embeddings=True)
+        query_embedding = self._get_embeddings([query_text])
         
         # Search FAISS index
         n_results = min(n_results, self.student_profiles_index.ntotal)
@@ -263,7 +320,7 @@ class SmartVectorDatabase:
             return []
         
         # Create query embedding
-        query_embedding = self.model.encode([query_text], normalize_embeddings=True)
+        query_embedding = self._get_embeddings([query_text])
         
         # Search FAISS index
         n_results = min(n_results, self.activities_index.ntotal)
