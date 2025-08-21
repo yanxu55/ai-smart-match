@@ -18,9 +18,23 @@ except ImportError:
     FAISS_AVAILABLE = False
 
 try:
+    import sys
+    import io
+    from contextlib import redirect_stderr
+    
+    # Suppress warnings from sentence_transformers import
+    old_stderr = sys.stderr
+    sys.stderr = io.StringIO()
+    
     from sentence_transformers import SentenceTransformer
     SENTENCE_TRANSFORMERS_AVAILABLE = True
+    
+    # Restore stderr
+    sys.stderr = old_stderr
 except ImportError:
+    # Restore stderr if import fails
+    if 'old_stderr' in locals():
+        sys.stderr = old_stderr
     SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 class SmartVectorDatabase:
@@ -50,7 +64,7 @@ class SmartVectorDatabase:
                 self.use_local_embeddings = False
                 self._setup_openai_embeddings()
         else:
-            print("ℹ️  sentence-transformers not available, using OpenAI embeddings")
+            # Use OpenAI embeddings (no message needed)
             self._setup_openai_embeddings()
             
     def _setup_openai_embeddings(self):

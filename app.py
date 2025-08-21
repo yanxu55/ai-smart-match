@@ -675,18 +675,70 @@ def show_activity_database_page():
         st.warning("No activities found in the database.")
         return
     
-    # Filters
-    col1, col2, col3 = st.columns(3)
+    # Filters with session state management
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
     
     with col1:
-        categories = list(set(activity['category'] for activity in activities))
-        selected_category = st.selectbox("Filter by Category", ["All"] + categories)
+        categories = sorted(list(set(activity['category'] for activity in activities)))
+        # Use session state for category filter
+        if 'activity_category_filter' not in st.session_state:
+            st.session_state.activity_category_filter = "All"
+        
+        selected_category = st.selectbox(
+            "Filter by Category", 
+            ["All"] + categories,
+            index=0 if st.session_state.activity_category_filter == "All" else 
+                  (["All"] + categories).index(st.session_state.activity_category_filter)
+                  if st.session_state.activity_category_filter in categories else 0,
+            key="category_selectbox"
+        )
+        
+        # Check if category changed and trigger rerun
+        if selected_category != st.session_state.activity_category_filter:
+            st.session_state.activity_category_filter = selected_category
+            st.rerun()
     
     with col2:
-        difficulty_range = st.slider("Difficulty Level", 1, 5, (1, 5))
+        # Use session state for difficulty filter
+        if 'activity_difficulty_filter' not in st.session_state:
+            st.session_state.activity_difficulty_filter = (1, 5)
+        
+        difficulty_range = st.slider(
+            "Difficulty Level", 
+            1, 5, 
+            st.session_state.activity_difficulty_filter,
+            key="difficulty_slider"
+        )
+        
+        # Check if difficulty range changed and trigger rerun
+        if difficulty_range != st.session_state.activity_difficulty_filter:
+            st.session_state.activity_difficulty_filter = difficulty_range
+            st.rerun()
     
     with col3:
-        search_term = st.text_input("Search activities", placeholder="Enter search term")
+        # Use session state for search filter
+        if 'activity_search_filter' not in st.session_state:
+            st.session_state.activity_search_filter = ""
+            
+        search_term = st.text_input(
+            "Search activities", 
+            placeholder="Enter search term",
+            value=st.session_state.activity_search_filter,
+            key="search_input"
+        )
+        
+        # Check if search term changed and trigger rerun
+        if search_term != st.session_state.activity_search_filter:
+            st.session_state.activity_search_filter = search_term
+            st.rerun()
+    
+    with col4:
+        st.write("") # spacer for alignment
+        if st.button("🔄 Reset Filters", type="primary", help="Reset all filters to show all activities"):
+            st.session_state.activity_category_filter = "All"
+            st.session_state.activity_difficulty_filter = (1, 5)
+            st.session_state.activity_search_filter = ""
+            st.rerun()
     
     # Filter activities
     filtered_activities = activities
@@ -694,7 +746,7 @@ def show_activity_database_page():
     if selected_category != "All":
         filtered_activities = [act for act in filtered_activities if act['category'] == selected_category]
     
-    if difficulty_range:
+    if difficulty_range and difficulty_range != (1, 5):
         filtered_activities = [act for act in filtered_activities 
                              if difficulty_range[0] <= act.get('difficulty_level', 1) <= difficulty_range[1]]
     
@@ -703,8 +755,26 @@ def show_activity_database_page():
                              if search_term.lower() in act['name'].lower() or 
                              search_term.lower() in act.get('description', '').lower()]
     
-    # Display activities
-    st.write(f"**Found {len(filtered_activities)} activities**")
+    # Display filter status
+    total_activities = len(activities)
+    filtered_count = len(filtered_activities)
+    
+    if filtered_count == total_activities:
+        st.success(f"📋 Showing all {total_activities} activities")
+    else:
+        filter_info = []
+        if selected_category != "All":
+            filter_info.append(f"Category: {selected_category}")
+        if difficulty_range != (1, 5):
+            filter_info.append(f"Difficulty: {difficulty_range[0]}-{difficulty_range[1]}")
+        if search_term:
+            filter_info.append(f"Search: '{search_term}'")
+        
+        st.info(f"📋 Showing {filtered_count} of {total_activities} activities | Filters: {', '.join(filter_info)}")
+        
+        if filtered_count == 0:
+            st.warning("No activities match your current filters. Try adjusting the filters or click 'Reset Filters' to see all activities.")
+            return
     
     # Activity grid
     cols = st.columns(2)
