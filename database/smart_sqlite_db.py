@@ -6,6 +6,7 @@ This is a lightweight alternative to ChromaDB for the AI Smart Match application
 import sqlite3
 import json
 import os
+import random
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import uuid
@@ -79,10 +80,30 @@ class SmartDatabaseManager:
         """Get a database connection."""
         return sqlite3.connect(self.db_path)
     
+    def _generate_unique_student_id(self) -> str:
+        """Generate a unique 4-digit student ID."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Try up to 100 times to find a unique ID
+        for _ in range(100):
+            # Generate a 4-digit ID (1000-9999)
+            student_id = str(random.randint(1000, 9999))
+            
+            # Check if ID already exists
+            cursor.execute('SELECT id FROM students WHERE id = ?', (student_id,))
+            if cursor.fetchone() is None:
+                conn.close()
+                return student_id
+        
+        conn.close()
+        # Fallback to UUID if we can't find a unique 4-digit ID
+        raise ValueError("Unable to generate unique 4-digit student ID. Database may be full.")
+    
     # Student operations
     def add_student(self, student_data: Dict) -> str:
         """Add a new student to the database."""
-        student_id = str(uuid.uuid4())
+        student_id = self._generate_unique_student_id()
         
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -173,6 +194,40 @@ class SmartDatabaseManager:
         
         conn.commit()
         conn.close()
+    
+    def delete_student(self, student_id: str) -> bool:
+        """
+        Delete a student and all associated data.
+        
+        Args:
+            student_id (str): The ID of the student to delete
+            
+        Returns:
+            bool: True if student was deleted, False if student not found
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # First check if student exists
+            cursor.execute('SELECT id FROM students WHERE id = ?', (student_id,))
+            if not cursor.fetchone():
+                return False
+            
+            # Delete associated recommendations first (foreign key constraint)
+            cursor.execute('DELETE FROM recommendations WHERE student_id = ?', (student_id,))
+            
+            # Delete the student
+            cursor.execute('DELETE FROM students WHERE id = ?', (student_id,))
+            
+            conn.commit()
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
     
     # Activity operations
     def add_activity(self, activity_data: Dict) -> str:
@@ -287,6 +342,50 @@ class SmartDatabaseManager:
             for row in rows
         ]
     
+    def delete_activity(self, activity_id: str) -> bool:
+        """
+        Delete an activity and all associated recommendations.
+        
+        Args:
+            activity_id (str): The ID of the activity to delete
+            
+        Returns:
+            bool: True if activity was deleted, False if activity not found
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # First check if activity exists and get its name for logging
+            cursor.execute('SELECT name FROM activities WHERE id = ?', (activity_id,))
+            result = cursor.fetchone()
+            if not result:
+                print(f"DEBUG: Activity with ID {activity_id} not found")
+                return False
+            
+            activity_name = result[0]
+            print(f"DEBUG: Deleting activity '{activity_name}' (ID: {activity_id})")
+            
+            # Delete associated recommendations first (foreign key constraint)
+            cursor.execute('DELETE FROM recommendations WHERE activity_id = ?', (activity_id,))
+            deleted_recs = cursor.rowcount
+            print(f"DEBUG: Deleted {deleted_recs} associated recommendations")
+            
+            # Delete the activity
+            cursor.execute('DELETE FROM activities WHERE id = ?', (activity_id,))
+            deleted_activities = cursor.rowcount
+            print(f"DEBUG: Deleted {deleted_activities} activity record")
+            
+            conn.commit()
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: Error during deletion: {e}")
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
     # Recommendation operations
     def save_recommendation(self, student_id: str, activity_id: str, 
                           compatibility_score: float, reasoning: str) -> str:
@@ -377,3 +476,65 @@ class SmartDatabaseManager:
             'average_compatibility_score': round(avg_score, 2),
             'top_activities': [{'name': row[0], 'count': row[1]} for row in top_activities]
         }
+    
+    def get_all_students_with_activities(self) -> List[Dict]:
+        """Get all students with their names, IDs, and recommended/chosen activities."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Get all students with their recommendations
+        cursor.execute('''
+            SELECT 
+                s.id, 
+                s.name, 
+                s.grade,
+                COUNT(r.id) as recommendation_count
+            FROM students s
+            LEFT JOIN recommendations r ON s.id = r.student_id
+            GROUP BY s.id, s.name, s.grade
+            ORDER BY s.name
+        ''')
+        
+        student_rows = cursor.fetchall()
+        
+        students_with_activities = []
+        for student_row in student_rows:
+            student_id = student_row[0]
+            student_name = student_row[1]
+            student_grade = student_row[2]
+            recommendation_count = student_row[3]
+            
+            # Get recommended activities for this student
+            cursor.execute('''
+                SELECT 
+                    a.name as activity_name,
+                    a.category,
+                    r.compatibility_score,
+                    r.recommended_at
+                FROM recommendations r
+                JOIN activities a ON r.activity_id = a.id
+                WHERE r.student_id = ?
+                ORDER BY r.compatibility_score DESC
+            ''', (student_id,))
+            
+            activity_rows = cursor.fetchall()
+            
+            activities = []
+            for activity_row in activity_rows:
+                activities.append({
+                    'name': activity_row[0],
+                    'category': activity_row[1],
+                    'compatibility_score': round(activity_row[2], 1),
+                    'recommended_at': activity_row[3]
+                })
+            
+            students_with_activities.append({
+                'id': student_id,
+                'name': student_name,
+                'grade': student_grade,
+                'recommendation_count': recommendation_count,
+                'activities': activities
+            })
+        
+        conn.close()
+        return students_with_activities

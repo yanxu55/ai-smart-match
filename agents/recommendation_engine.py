@@ -56,7 +56,10 @@ class RecommendationEngine:
         # Sort by score and return top recommendations
         scored_activities.sort(key=lambda x: x['score'], reverse=True)
         
-        # Save recommendations to database
+        # Clear existing recommendations before saving new ones
+        self.db_manager.clear_student_recommendations(student_id)
+        
+        # Save new recommendations to database
         for rec in scored_activities[:n_recommendations]:
             self.db_manager.save_recommendation(
                 student_id=student_id,
@@ -222,7 +225,7 @@ class RecommendationEngine:
         else:
             return 6.0  # Moderate match
     
-    def get_recommendation_insights(self, student_id: str) -> Dict:
+    def get_recommendation_insights(self, student_id: str, n_recommendations: int = 3) -> Dict:
         """Get insights about the recommendation process for a student."""
         student = self.db_manager.get_student(student_id)
         if not student:
@@ -231,8 +234,8 @@ class RecommendationEngine:
         # Analyze student profile
         profile_analysis = self.ai_agent.analyze_student_profile(student)
         
-        # Get recommendations
-        recommendations = self.generate_recommendations(student_id, n_recommendations=5)
+        # Get recommendations with the specified number
+        recommendations = self.generate_recommendations(student_id, n_recommendations=n_recommendations)
         
         # Create development pathway
         development_pathway = self.ai_agent.plan_development_pathway(student, [rec['activity'] for rec in recommendations])

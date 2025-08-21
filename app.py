@@ -71,6 +71,39 @@ st.markdown("""
         margin: 8px 0;
         background-color: #fafafa;
     }
+    
+    /* Make primary buttons blue except for Stop App button */
+    .stButton > button[kind="primary"] {
+        background-color: #0066cc !important;
+        border-color: #0066cc !important;
+        color: white !important;
+    }
+    
+    .stButton > button[kind="primary"]:hover {
+        background-color: #0052a3 !important;
+        border-color: #0052a3 !important;
+        color: white !important;
+    }
+    
+    /* Keep Stop App button as secondary/gray */
+    div[data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+        background-color: #f0f2f6 !important;
+        border-color: #d0d0d0 !important;
+        color: #333 !important;
+    }
+    
+    /* Form submit buttons should also be blue */
+    .stFormSubmitButton > button {
+        background-color: #0066cc !important;
+        border-color: #0066cc !important;
+        color: white !important;
+    }
+    
+    .stFormSubmitButton > button:hover {
+        background-color: #0052a3 !important;
+        border-color: #0052a3 !important;
+        color: white !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -104,6 +137,12 @@ try:
         if len(activities) == 0:
             with st.spinner("Initializing sample data..."):
                 initialize_sample_data(db_manager, vector_db)
+        else:
+            # Ensure vector database is populated even if SQLite has data
+            if vector_db.activities_index.ntotal == 0 and len(activities) > 0:
+                with st.spinner("Indexing activities for recommendations..."):
+                    vector_db.add_activities(activities)
+                    st.success(f"Indexed {len(activities)} activities for better recommendations!")
         st.session_state.initialized = True
         
 except Exception as e:
@@ -122,26 +161,24 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.selectbox(
         "Choose a page:",
-        ["Student Profile", "Get Recommendations", "Activity Database", "Add New Activity", "Analytics Dashboard"]
+        ["Student Profile", "Get Recommendations", "Student Directory", "Activity Database", "Add New Activity", "Analytics Dashboard"]
     )
     
-    # Show AI configuration in sidebar
-    with st.sidebar.expander("🤖 AI Configuration", expanded=False):
-        try:
-            model_info = ai_agent.get_model_info()
-            st.write(f"**Provider:** {model_info['provider']}")
-            st.write(f"**Model:** {model_info['model']}")
-            if model_info.get('api_version'):
-                st.write(f"**API Version:** {model_info['api_version']}")
-            if model_info.get('endpoint'):
-                st.write(f"**Endpoint:** {model_info['endpoint']}")
-        except Exception as e:
-            st.error(f"AI configuration error: {str(e)}")
+    # Add stop app button
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### App Control")
+    if st.sidebar.button("🛑 Stop App", type="secondary", help="Click to stop the Streamlit application"):
+        st.sidebar.error("Shutting down application...")
+        st.sidebar.markdown("Please close this browser tab.")
+        # Force exit the entire application
+        os._exit(0)
     
     if page == "Student Profile":
         show_student_profile_page()
     elif page == "Get Recommendations":
         show_recommendations_page()
+    elif page == "Student Directory":
+        show_student_directory_page()
     elif page == "Activity Database":
         show_activity_database_page()
     elif page == "Add New Activity":
@@ -185,7 +222,7 @@ def create_student_profile():
         st.subheader("Interests")
         st.write("Select your interests (choose multiple):")
         
-        sample_interests = get_sample_interests()
+        sample_interests = sorted(get_sample_interests())
         selected_interests = []
         
         # Create columns for interests
@@ -209,7 +246,7 @@ def create_student_profile():
         st.subheader("Strengths")
         st.write("Select your strengths (choose multiple):")
         
-        sample_strengths = get_sample_strengths()
+        sample_strengths = sorted(get_sample_strengths())
         selected_strengths = []
         
         cols = st.columns(4)
@@ -232,7 +269,7 @@ def create_student_profile():
         st.subheader("Values")
         st.write("Select your core values (choose multiple):")
         
-        sample_values = get_sample_values()
+        sample_values = sorted(get_sample_values())
         selected_values = []
         
         cols = st.columns(4)
@@ -307,9 +344,9 @@ def load_existing_profile():
     
     # For demo purposes, we'll create a simple ID input
     # In a real application, you might have a dropdown of students or login system
-    student_id = st.text_input("Enter Student ID", placeholder="Enter your student ID")
+    student_id = st.text_input("Enter Student ID", placeholder="Enter your 4-digit student ID (e.g., 1234)")
     
-    if st.button("Load Profile"):
+    if st.button("Load Profile", type="primary"):
         if student_id:
             try:
                 student = db_manager.get_student(student_id)
@@ -361,7 +398,7 @@ def show_recommendations_page():
     col1, col2 = st.columns(2)
     
     with col1:
-        num_recommendations = st.slider("Number of recommendations", 3, 15, 3)
+        num_recommendations = st.slider("Number of recommendations", 1, 15, 3)
     
     with col2:
         include_insights = st.checkbox("Include detailed insights", value=True)
@@ -377,35 +414,47 @@ def show_recommendations_page():
                 if recommendations:
                     st.success(f"Generated {len(recommendations)} recommendations!")
                     
-                    # Highlight top 3 recommendations
-                    if len(recommendations) >= 3:
-                        st.subheader("🏆 Your Top 3 Recommended Activities")
-                        
-                        # Display top 3 prominently
-                        for i, rec in enumerate(recommendations[:3], 1):
-                            with st.container():
-                                # Add medal emoji for top 3
-                                medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
-                                
-                                st.markdown(f"""
-                                <div style="background-color: {'#fff2e6' if i == 1 else '#f0f8ff' if i == 2 else '#f8fff8'}; 
-                                           padding: 20px; border-radius: 10px; margin: 15px 0; 
-                                           border-left: 5px solid {'#ff6b35' if i == 1 else '#4da6ff' if i == 2 else '#66cc66'};">
-                                    <h3>{medal} #{i}: {rec['activity']['name']} 
-                                        <span style="color: #666; font-size: 0.8em;">(Score: {rec['score']:.1f}/10)</span>
-                                    </h3>
-                                    <p><strong>Category:</strong> {rec['activity']['category']}</p>
-                                    <p><strong>Why this is perfect for you:</strong> {rec['reasoning']}</p>
-                                    <p><strong>Skills you'll develop:</strong> {', '.join(rec['activity'].get('skills_developed', []))}</p>
-                                    <p><strong>Time commitment:</strong> {rec['activity'].get('time_commitment', 'Not specified')}</p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                        
-                        # Show additional recommendations if any
-                        if len(recommendations) > 3:
-                            st.subheader(f"📋 Additional Recommendations ({len(recommendations) - 3} more)")
-                    else:
-                        st.subheader("Your Recommended Activities")
+                    # Display all recommendations prominently
+                    st.subheader("🏆 Your Recommended Activities")
+                    
+                    # Display all recommendations
+                    for i, rec in enumerate(recommendations, 1):
+                        with st.container():
+                            # Add medal emoji for top 4, then numbered
+                            if i == 1:
+                                medal = "🥇"
+                                bg_color = "#fff2e6"
+                                border_color = "#ff6b35"
+                            elif i == 2:
+                                medal = "�"
+                                bg_color = "#f0f8ff"
+                                border_color = "#4da6ff"
+                            elif i == 3:
+                                medal = "🥉"
+                                bg_color = "#f8fff8"
+                                border_color = "#66cc66"
+                            elif i == 4:
+                                medal = "🏅"
+                                bg_color = "#faf0ff"
+                                border_color = "#9966cc"
+                            else:
+                                medal = f"{i}."
+                                bg_color = "#f9f9f9"
+                                border_color = "#cccccc"
+                            
+                            st.markdown(f"""
+                            <div style="background-color: {bg_color}; 
+                                       padding: 20px; border-radius: 10px; margin: 15px 0; 
+                                       border-left: 5px solid {border_color};">
+                                <h3>{medal} #{i}: {rec['activity']['name']} 
+                                    <span style="color: #666; font-size: 0.8em;">(Score: {rec['score']:.1f}/10)</span>
+                                </h3>
+                                <p><strong>Category:</strong> {rec['activity']['category']}</p>
+                                <p><strong>Why this is perfect for you:</strong> {rec['reasoning']}</p>
+                                <p><strong>Skills you'll develop:</strong> {', '.join(rec['activity'].get('skills_developed', []))}</p>
+                                <p><strong>Time commitment:</strong> {rec['activity'].get('time_commitment', 'Not specified')}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                     
                     # Create tabs for different views
                     tab1, tab2, tab3 = st.tabs(["📋 List View", "📊 Dashboard", "📈 Insights"])
@@ -413,11 +462,11 @@ def show_recommendations_page():
                     with tab1:
                         # List view with detailed cards
                         for i, rec in enumerate(recommendations):
-                            with st.expander(f"{i+1}. {rec['activity']['name']} (Score: {rec['score']:.1f}/10)", expanded=i<3):
+                            with st.expander(f"{i+1}. {rec['activity']['name']} (Score: {rec['score']:.1f}/10)", expanded=i<4):
                                 st.markdown(format_recommendation_card(rec), unsafe_allow_html=True)
                                 
                                 # Score breakdown
-                                if st.button(f"Show Score Breakdown", key=f"breakdown_{i}"):
+                                if st.button(f"Show Score Breakdown", key=f"breakdown_{i}", type="primary"):
                                     fig = create_score_breakdown_chart(rec)
                                     st.plotly_chart(fig, use_container_width=True)
                     
@@ -450,7 +499,7 @@ def show_recommendations_page():
                         # Detailed insights
                         if include_insights:
                             with st.spinner("Generating detailed insights..."):
-                                insights = recommendation_engine.get_recommendation_insights(student_id)
+                                insights = recommendation_engine.get_recommendation_insights(student_id, num_recommendations)
                                 
                                 if insights:
                                     display_student_insights(insights)
@@ -495,6 +544,118 @@ def show_recommendations_page():
                     
             except Exception as e:
                 st.error(f"Error generating recommendations: {str(e)}")
+
+def show_student_directory_page():
+    """Show the student directory page with all students and their activities."""
+    st.header("👥 Student Directory")
+    st.markdown("View all students with their IDs and recommended activities")
+    
+    try:
+        # Get all students with activities
+        students_with_activities = db_manager.get_all_students_with_activities()
+        
+        if not students_with_activities:
+            st.info("No students found in the database.")
+            return
+        
+        # Statistics summary
+        total_students = len(students_with_activities)
+        students_with_recommendations = len([s for s in students_with_activities if s['recommendation_count'] > 0])
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Students", total_students)
+        with col2:
+            st.metric("Students with Recommendations", students_with_recommendations)
+        with col3:
+            st.metric("Students without Recommendations", total_students - students_with_recommendations)
+        
+        st.markdown("---")
+        
+        # Display students
+        for student in students_with_activities:
+            with st.expander(f"🎓 {student['name']} (ID: {student['id']})", expanded=False):
+                col1, col2 = st.columns([1, 2])
+                
+                with col1:
+                    st.write(f"**Grade:** {student.get('grade', 'N/A')}")
+                    st.write(f"**Student ID:** `{student['id']}`")
+                    st.write(f"**Recommendations:** {student['recommendation_count']}")
+                
+                with col2:
+                    if student['activities']:
+                        st.write("**Recommended Activities:**")
+                        for i, activity in enumerate(student['activities'], 1):
+                            st.write(f"{i}. **{activity['name']}** ({activity['category']})")
+                            st.write(f"   📊 Compatibility Score: {activity['compatibility_score']}")
+                            st.write(f"   📅 Recommended: {activity['recommended_at']}")
+                            st.write("")
+                    else:
+                        st.info("No activities recommended yet. Visit the 'Get Recommendations' page to generate recommendations for this student.")
+                
+                # Quick action buttons
+                st.markdown("**Quick Actions:**")
+                col_btn1, col_btn2, col_btn3 = st.columns(3)
+                with col_btn1:
+                    if st.button(f"View Profile", key=f"profile_{student['id']}", type="primary"):
+                        st.session_state.current_student_id = student['id']
+                        st.session_state.students[student['id']] = db_manager.get_student(student['id'])
+                        st.success(f"Switched to {student['name']}'s profile!")
+                        st.rerun()
+                
+                with col_btn2:
+                    if st.button(f"Generate Recommendations", key=f"recs_{student['id']}", type="primary"):
+                        st.session_state.current_student_id = student['id']
+                        st.session_state.students[student['id']] = db_manager.get_student(student['id'])
+                        st.success(f"Ready to generate recommendations for {student['name']}!")
+                        st.info("Go to 'Get Recommendations' page to generate new recommendations.")
+                
+                with col_btn3:
+                    # Delete button with confirmation
+                    delete_key = f"delete_confirm_{student['id']}"
+                    
+                    if delete_key not in st.session_state:
+                        # Show delete button
+                        if st.button(f"🗑️ Delete Student", key=f"delete_{student['id']}", type="primary", help="Delete this student and all their data"):
+                            st.session_state[delete_key] = True
+                            st.rerun()
+                    else:
+                        # Show confirmation dialog
+                        st.warning(f"⚠️ Are you sure you want to delete **{student['name']}**?")
+                        st.write("This action cannot be undone!")
+                        
+                        col_del1, col_del2 = st.columns(2)
+                        with col_del1:
+                            if st.button("✅ Yes, Delete", key=f"confirm_yes_{student['id']}", type="primary"):
+                                try:
+                                    success = db_manager.delete_student(student['id'])
+                                    if success:
+                                        # Clean up session state
+                                        if delete_key in st.session_state:
+                                            del st.session_state[delete_key]
+                                        if st.session_state.get('current_student_id') == student['id']:
+                                            st.session_state.current_student_id = None
+                                        if 'students' in st.session_state and student['id'] in st.session_state.students:
+                                            del st.session_state.students[student['id']]
+                                        
+                                        st.success(f"✅ Successfully deleted {student['name']} and all associated data!")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ Failed to delete student {student['name']}. Student not found.")
+                                        del st.session_state[delete_key]
+                                except Exception as e:
+                                    st.error(f"❌ Error deleting student: {str(e)}")
+                                    if delete_key in st.session_state:
+                                        del st.session_state[delete_key]
+                        
+                        with col_del2:
+                            if st.button("❌ Cancel", key=f"cancel_{student['id']}", type="secondary"):
+                                del st.session_state[delete_key]
+                                st.info("Delete cancelled.")
+                                st.rerun()
+    
+    except Exception as e:
+        st.error(f"Error loading student directory: {str(e)}")
 
 def show_activity_database_page():
     """Show the activity database page."""
@@ -570,6 +731,45 @@ def show_activity_database_page():
                 skills = activity.get('skills_developed', [])
                 if skills:
                     st.write("**Skills:** " + ", ".join(skills[:5]))
+                
+                # Delete button
+                delete_key = f"delete_activity_{activity['id']}"
+                confirm_key = f"confirm_delete_activity_{activity['id']}"
+                
+                if st.button(f"🗑️ Delete Activity", key=delete_key, type="primary", help=f"Delete {activity['name']} and all associated recommendations"):
+                    st.session_state[confirm_key] = True
+                
+                # Show confirmation dialog if delete was clicked
+                if st.session_state.get(confirm_key, False):
+                    st.warning(f"⚠️ Are you sure you want to delete '{activity['name']}'? This will also delete all recommendations for this activity and cannot be undone!")
+                    
+                    col_confirm1, col_confirm2 = st.columns(2)
+                    with col_confirm1:
+                        if st.button("✅ Yes, Delete", key=f"confirm_yes_{activity['id']}", type="primary"):
+                            try:
+                                success = db_manager.delete_activity(activity['id'])
+                                if success:
+                                    # Clean up session state
+                                    if confirm_key in st.session_state:
+                                        del st.session_state[confirm_key]
+                                    
+                                    st.success(f"✅ Successfully deleted '{activity['name']}' and all associated recommendations!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Failed to delete activity '{activity['name']}'. Activity not found.")
+                                    if confirm_key in st.session_state:
+                                        del st.session_state[confirm_key]
+                            except Exception as e:
+                                st.error(f"❌ Error deleting activity: {str(e)}")
+                                if confirm_key in st.session_state:
+                                    del st.session_state[confirm_key]
+                    
+                    with col_confirm2:
+                        if st.button("❌ Cancel", key=f"confirm_no_{activity['id']}", type="primary"):
+                            if confirm_key in st.session_state:
+                                del st.session_state[confirm_key]
+                            st.info("Delete cancelled.")
+                            st.rerun()
                 
                 st.divider()
 

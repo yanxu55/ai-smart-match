@@ -54,19 +54,42 @@ class SmartVectorDatabase:
             self._setup_openai_embeddings()
             
     def _setup_openai_embeddings(self):
-        """Setup OpenAI embeddings as fallback"""
+        """Setup Azure OpenAI embeddings as fallback"""
         import openai
         from dotenv import load_dotenv
         load_dotenv()
         
-        api_key = os.getenv('OPENAI_API_KEY')
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY not found in environment variables. Please set it in your .env file.")
+        # Check for Azure OpenAI configuration first
+        azure_api_key = os.getenv('AZURE_OPENAI_API_KEY')
+        azure_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+        azure_api_version = os.getenv('AZURE_OPENAI_API_VERSION')
+        azure_embedding_model = os.getenv('AZURE_OPENAI_EMBEDDING_MODEL')
         
-        self.openai_client = openai.OpenAI(api_key=api_key)
-        self.embedding_model = "text-embedding-ada-002"
-        self.embedding_dim = 1536  # OpenAI ada-002 dimension
-        print(f"   Using OpenAI embeddings with dimension: {self.embedding_dim}")
+        if azure_api_key and azure_endpoint and azure_embedding_model:
+            # Use Azure OpenAI
+            self.openai_client = openai.AzureOpenAI(
+                api_key=azure_api_key,
+                azure_endpoint=azure_endpoint,
+                api_version=azure_api_version or "2023-12-01-preview"
+            )
+            self.embedding_model = azure_embedding_model
+            self.embedding_dim = 1536  # Standard embedding dimension
+            print(f"   Using Azure OpenAI embeddings with model: {azure_embedding_model}")
+        else:
+            # Fallback to regular OpenAI
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                raise ValueError("Neither AZURE_OPENAI_API_KEY nor OPENAI_API_KEY found in environment variables. Please configure Azure OpenAI or OpenAI in your .env file.")
+            
+            self.openai_client = openai.OpenAI(api_key=api_key)
+            self.embedding_model = "text-embedding-ada-002"
+            self.embedding_dim = 1536  # OpenAI ada-002 dimension
+            print(f"   Using OpenAI embeddings with model: {self.embedding_model}")
+        
+        print(f"   Embedding dimension: {self.embedding_dim}")
+        
+        # Initialize FAISS indices and metadata
+        self._initialize_indices()
         
     def _get_embeddings(self, texts):
         """Get embeddings using either local model or OpenAI API"""
@@ -91,7 +114,9 @@ class SmartVectorDatabase:
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
             embeddings = embeddings / (norms + 1e-8)  # Avoid division by zero
             return embeddings
-        
+    
+    def _initialize_indices(self):
+        """Initialize FAISS indices and metadata storage"""
         # Initialize FAISS indices
         self.activities_index = None
         self.student_profiles_index = None

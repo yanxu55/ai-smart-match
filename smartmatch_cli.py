@@ -230,7 +230,7 @@ class SmartMatchCLI:
         print("-" * 30)
         
         # Get student ID
-        student_id = input("Enter student ID: ").strip()
+        student_id = input("Enter 4-digit student ID: ").strip()
         if not student_id:
             print("❌ Student ID is required!")
             return
