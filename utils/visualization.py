@@ -78,11 +78,16 @@ def create_impact_dashboard(recommendations: List[Dict]) -> go.Figure:
     
     return fig
 
+def format_score_category(category: str) -> str:
+    """Format score category names by replacing underscores with spaces and title casing."""
+    return category.replace('_', ' ').title()
+
 def create_score_breakdown_chart(recommendation: Dict) -> go.Figure:
     """Create a detailed score breakdown chart for a single recommendation."""
     breakdown = recommendation.get('score_breakdown', {})
     
-    categories = list(breakdown.keys())
+    # Format category names
+    categories = [format_score_category(cat) for cat in breakdown.keys()]
     scores = list(breakdown.values())
     
     # Create horizontal bar chart

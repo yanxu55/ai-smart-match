@@ -75,8 +75,7 @@ streamlit run app.py
 
 1. Go to the **Get Recommendations** page
 2. Adjust the number of recommendations (3-15)
-3. Choose whether to include detailed insights
-4. Click "Generate Recommendations"
+3. Click "Generate Recommendations"
 
 ### Understanding Your Results
 

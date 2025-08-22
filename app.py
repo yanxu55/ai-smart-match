@@ -381,6 +381,10 @@ def show_recommendations_page():
     """Show the recommendations page."""
     st.header("🎯 Personalized Recommendations")
     
+    # Initialize session state for score breakdowns
+    if 'show_breakdowns' not in st.session_state:
+        st.session_state.show_breakdowns = set()
+    
     if not st.session_state.current_student_id:
         st.warning("Please create or load a student profile first.")
         return
@@ -410,6 +414,9 @@ def show_recommendations_page():
                 recommendations = recommendation_engine.generate_recommendations(
                     student_id, n_recommendations=num_recommendations
                 )
+                
+                # Store recommendations in session state for persistence across button clicks
+                st.session_state.current_recommendations = recommendations
                 
                 if recommendations:
                     st.success(f"Generated {len(recommendations)} recommendations!")
@@ -544,6 +551,144 @@ def show_recommendations_page():
                     
             except Exception as e:
                 st.error(f"Error generating recommendations: {str(e)}")
+    
+    # Also display recommendations if they exist in session state (for persistence across button clicks)
+    elif hasattr(st.session_state, 'current_recommendations') and st.session_state.current_recommendations:
+        recommendations = st.session_state.current_recommendations
+        
+        # Display all recommendations prominently
+        st.subheader("🏆 Your Recommended Activities")
+        
+        # Display all recommendations
+        for i, rec in enumerate(recommendations, 1):
+            with st.container():
+                # Add medal emoji for top 4, then numbered
+                if i == 1:
+                    medal = "🥇"
+                    bg_color = "#fff2e6"
+                    border_color = "#ff6b35"
+                elif i == 2:
+                    medal = "🥈"
+                    bg_color = "#f0f8ff"
+                    border_color = "#4da6ff"
+                elif i == 3:
+                    medal = "🥉"
+                    bg_color = "#f0fff0"
+                    border_color = "#32cd32"
+                elif i == 4:
+                    medal = "🏅"
+                    bg_color = "#fdf5e6"
+                    border_color = "#daa520"
+                else:
+                    medal = f"{i}."
+                    bg_color = "#f9f9f9"
+                    border_color = "#cccccc"
+                
+                st.markdown(f"""
+                <div style="background-color: {bg_color}; 
+                           padding: 20px; border-radius: 10px; margin: 15px 0; 
+                           border-left: 5px solid {border_color};">
+                    <h3>{medal} #{i}: {rec['activity']['name']} 
+                        <span style="color: #666; font-size: 0.8em;">(Score: {rec['score']:.1f}/10)</span>
+                    </h3>
+                    <p><strong>Category:</strong> {rec['activity']['category']}</p>
+                    <p><strong>Why this is perfect for you:</strong> {rec['reasoning']}</p>
+                    <p><strong>Skills you'll develop:</strong> {', '.join(rec['activity'].get('skills_developed', []))}</p>
+                    <p><strong>Time commitment:</strong> {rec['activity'].get('time_commitment', 'Not specified')}</p>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Create tabs for different views
+        tab1, tab2, tab3 = st.tabs(["📋 List View", "📊 Dashboard", "📈 Insights"])
+        
+        with tab1:
+            # List view with detailed cards
+            for i, rec in enumerate(recommendations):
+                with st.expander(f"{i+1}. {rec['activity']['name']} (Score: {rec['score']:.1f}/10)", expanded=i<4):
+                    st.markdown(format_recommendation_card(rec), unsafe_allow_html=True)
+                    
+                    # Score breakdown button and chart with session state
+                    breakdown_key = f"breakdown_{i}"
+                    button_text = "Hide Score Breakdown" if breakdown_key in st.session_state.show_breakdowns else "Show Score Breakdown"
+                    
+                    if st.button(button_text, key=breakdown_key, type="primary"):
+                        if breakdown_key in st.session_state.show_breakdowns:
+                            st.session_state.show_breakdowns.remove(breakdown_key)
+                        else:
+                            st.session_state.show_breakdowns.add(breakdown_key)
+                    
+                    # Show chart if this breakdown is active
+                    if breakdown_key in st.session_state.show_breakdowns:
+                        fig = create_score_breakdown_chart(rec)
+                        st.plotly_chart(fig, use_container_width=True)
+        
+        with tab2:
+            # Dashboard view
+            st.subheader("Impact Dashboard")
+            fig = create_impact_dashboard(recommendations)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                avg_score = sum(rec['score'] for rec in recommendations) / len(recommendations)
+                st.metric("Average Score", f"{avg_score:.1f}/10")
+            
+            with col2:
+                categories = set(rec['activity']['category'] for rec in recommendations)
+                st.metric("Categories Covered", len(categories))
+            
+            with col3:
+                high_impact = sum(1 for rec in recommendations if rec['activity'].get('social_impact_score', 0) >= 8)
+                st.metric("High Social Impact", high_impact)
+            
+            with col4:
+                high_growth = sum(1 for rec in recommendations if rec['activity'].get('personal_growth_score', 0) >= 8)
+                st.metric("High Personal Growth", high_growth)
+        
+        with tab3:
+            # Always show detailed insights
+            with st.spinner("Generating detailed insights..."):
+                insights = recommendation_engine.get_recommendation_insights(student_id, len(recommendations))
+                
+                if insights:
+                    display_student_insights(insights)
+                    
+                    # Development pathway
+                    if 'development_pathway' in insights:
+                        st.subheader("🗺️ Development Pathway")
+                        pathway = insights['development_pathway']
+                        
+                        if pathway.get('activity_sequence'):
+                            fig = create_development_pathway_chart(pathway)
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Goals and milestones
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**Short-term Goals:**")
+                            for goal in pathway.get('short_term_goals', []):
+                                st.write(f"• {goal}")
+                        
+                        with col2:
+                            st.write("**Long-term Goals:**")
+                            for goal in pathway.get('long_term_goals', []):
+                                st.write(f"• {goal}")
+        
+        # Export recommendations
+        st.subheader("📥 Export Recommendations")
+        
+        df = export_recommendations_to_csv(recommendations)
+        csv = df.to_csv(index=False)
+        
+        st.download_button(
+            label="Download as CSV",
+            data=csv,
+            file_name=f"recommendations_{student['name'].replace(' ', '_')}.csv",
+            mime="text/csv"
+        )
 
 def show_student_directory_page():
     """Show the student directory page with all students and their activities."""
